@@ -1,0 +1,385 @@
+<!-- Save as index.html and open in a browser -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dyslexia Helper — Summarize & Read</title>
+  <style>
+    /* Dyslexia-friendly simple styling */
+    :root {
+      --bg: #fffef6;
+      --card: #ffffff;
+      --accent: #0066cc;
+      --ok: #28a745;
+      --text: #1a1a1a;
+      --maxwidth: 900px;
+    }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: var(--maxwidth);
+      margin: 0 auto;
+    }
+    header {
+      text-align: center;
+      padding: 18px 10px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 2rem;
+    }
+    p.lead {
+      margin: 6px 0 0;
+      color: #333;
+      font-size: 1rem;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 6px 18px rgba(20,20,20,0.06);
+      margin-bottom: 14px;
+    }
+    label { display:block; font-weight:600; margin-bottom:6px; }
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      padding: 12px;
+      font-size: 18px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      resize: vertical;
+      line-height: 1.8;
+    }
+    .controls {
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 10px 14px;
+      border-radius: 8px;
+      cursor:pointer;
+      font-weight:600;
+      font-size: 16px;
+    }
+    button.secondary {
+      background: #444;
+    }
+    button.stop {
+      background: #cc3333;
+    }
+    .output {
+      font-size: 18px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #fafafa;
+      min-height: 50px;
+    }
+    .flashcards { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; }
+    .card-small {
+      background: #fff;
+      border-radius:8px;
+      padding:10px;
+      border: 1px solid #eee;
+      min-width: 220px;
+      flex: 1 1 220px;
+    }
+    footer { text-align:center; margin-top:18px; color:#666; font-size:14px; }
+    .hint { color:#555; font-size:14px; margin-top:8px; }
+    @media (max-width:520px) {
+      h1 { font-size:1.4rem; }
+      button { font-size:14px; padding:8px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Dyslexia Helper</h1>
+      <p class="lead">Paste lecture notes to get a short summary + audio and quick flashcards.</p>
+    </header>
+
+    <div class="card">
+      <label for="lectureNotes">Paste lecture notes or text here</label>
+      <textarea id="lectureNotes" placeholder="Paste your lecture notes..."></textarea>
+      <div class="controls">
+        <button id="generateBtn">Generate Summary & Play</button>
+        <button id="playBtn" class="secondary" disabled>Play Again</button>
+        <button id="stopBtn" class="stop" disabled>Stop Audio</button>
+        <button id="copyBtn" class="secondary" disabled>Copy Summary</button>
+        <button id="clearBtn" class="secondary">Clear</button>
+      </div>
+      <div class="hint">Tip: For best results paste a few paragraphs (lecture sections). If input is very short it will be returned as-is.</div>
+    </div>
+
+    <div class="card">
+      <h2>Summary</h2>
+      <div id="summary" class="output">Your summary will appear here.</div>
+
+      <h3 style="margin-top:12px">Flashcards</h3>
+      <div id="flashcards" class="flashcards">
+        <!-- generated flashcards go here -->
+      </div>
+    </div>
+
+    <footer>
+      Created with ❤️ to help learners. Use a modern browser (Chrome/Firefox) for best audio support.
+    </footer>
+  </div>
+
+  <script>
+    // --- Simple extractive summarizer (client-side) + TTS controls ---
+    const lectureEl = document.getElementById('lectureNotes');
+    const generateBtn = document.getElementById('generateBtn');
+    const playBtn = document.getElementById('playBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    const summaryEl = document.getElementById('summary');
+    const flashcardsEl = document.getElementById('flashcards');
+
+    // small stopword list
+    const STOPWORDS = new Set([
+      'the','and','for','that','this','with','are','was','were','but','not','from','they','you',
+      'your','have','has','had','will','can','their','there','what','which','when','where','how',
+      'a','an','in','on','of','to','is','it','as','by','or','be','at','we','our','us'
+    ]);
+
+    function splitIntoSentences(text) {
+      // try to capture sentences keeping punctuation
+      const s = text.replace(/\n+/g, ' ').trim();
+      const matches = s.match(/[^.!?]+[.!?]*/g);
+      if (!matches) {
+        // fallback: break on period or newline
+        return s.split(/(?<=[.?!])\s+|[\r\n]+/).filter(Boolean);
+      }
+      return matches.map(x => x.trim()).filter(Boolean);
+    }
+
+    function tokenizeWords(text) {
+      const m = text.toLowerCase().match(/\b[a-z0-9']+\b/g);
+      return m || [];
+    }
+
+    function buildWordFreq(words) {
+      const freq = Object.create(null);
+      for (const w of words) {
+        if (w.length <= 2) continue;
+        if (STOPWORDS.has(w)) continue;
+        freq[w] = (freq[w] || 0) + 1;
+      }
+      return freq;
+    }
+
+    function summarizeContent(text, maxSentences = 3) {
+      if (!text || !text.trim()) return '';
+      if (text.trim().length < 200) return text.trim(); // too short, return as-is
+
+      const sentences = splitIntoSentences(text);
+      if (sentences.length <= maxSentences) return sentences.join(' ');
+
+      const allWords = tokenizeWords(text);
+      const freq = buildWordFreq(allWords);
+
+      // score each sentence
+      const sentenceScores = sentences.map((sent, idx) => {
+        const words = tokenizeWords(sent);
+        let score = 0;
+        for (const w of words) {
+          if (freq[w]) score += freq[w];
+        }
+        // normalize by length to avoid bias to long sentences
+        return { idx, score: score / Math.max(1, words.length), text: sent };
+      });
+
+      // pick top N sentences by score
+      const picked = sentenceScores
+        .slice()
+        .sort((a,b) => b.score - a.score)
+        .slice(0, maxSentences)
+        .sort((a,b) => a.idx - b.idx) // keep original order
+        .map(s => s.text.trim());
+
+      return picked.join(' ');
+    }
+
+    function generateFlashcardsFromSummary(summary, maxCards = 4) {
+      // Very simple heuristics for demo:
+      // - find short noun phrases by taking sentences and turning important nouns into Qs
+      // - fallback: split into small facts
+      if (!summary) return [];
+      const sentences = splitIntoSentences(summary);
+      const cards = [];
+      for (const sent of sentences) {
+        const words = tokenizeWords(sent);
+        // try to find a 2-3 word noun phrase near start or middle
+        let key = null;
+        for (let i=0;i<words.length-1;i++){
+          if (!STOPWORDS.has(words[i]) && words[i].length>3) {
+            key = words[i];
+            if (words[i+1] && !STOPWORDS.has(words[i+1]) && words[i+1].length>3) {
+              key = words[i] + ' ' + words[i+1];
+            }
+            break;
+          }
+        }
+        if (!key && words.length>0) key = words[0];
+        if (key) {
+          const q = `What is ${key.replace(/\b([a-z])/g, (m)=>m.toUpperCase())}?`;
+          const a = sent;
+          cards.push({ q, a });
+        }
+        if (cards.length >= maxCards) break;
+      }
+      // fallback: if no cards created, split into chunks
+      if (cards.length === 0) {
+        const tokens = summary.split('.').map(s=>s.trim()).filter(Boolean);
+        for (let i=0;i<Math.min(maxCards, tokens.length); i++) {
+          cards.push({ q: `Key point ${i+1}`, a: tokens[i] });
+        }
+      }
+      return cards;
+    }
+
+    // TTS
+    let lastUtterance = null;
+    function speakText(text) {
+      if (!text) return;
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel(); // stop any ongoing speech
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'en-US';
+        u.rate = 0.95;
+        u.pitch = 1;
+        lastUtterance = u;
+        // enable/disable buttons
+        stopBtn.disabled = false;
+        playBtn.disabled = true;
+        copyBtn.disabled = false;
+        u.onend = () => {
+          stopBtn.disabled = true;
+          playBtn.disabled = false;
+        };
+        window.speechSynthesis.speak(u);
+      } else {
+        alert('Speech synthesis not supported in this browser. Try Chrome or Firefox.');
+      }
+    }
+
+    function stopSpeech() {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        stopBtn.disabled = true;
+        playBtn.disabled = false;
+      }
+    }
+
+    // UI actions
+    generateBtn.addEventListener('click', () => {
+      const txt = lectureEl.value.trim();
+      if (!txt) {
+        alert('Please paste some lecture notes first.');
+        return;
+      }
+      const short = summarizeContent(txt, 3);
+      summaryEl.textContent = short;
+      // generate flashcards
+      flashcardsEl.innerHTML = '';
+      const cards = generateFlashcardsFromSummary(short, 4);
+      for (const c of cards) {
+        const el = document.createElement('div');
+        el.className = 'card-small';
+        el.innerHTML = `<strong>Q:</strong> ${escapeHtml(c.q)}<hr style="border:none;border-top:1px solid #eee;margin:8px 0"><strong>A:</strong> ${escapeHtml(c.a)}`;
+        flashcardsEl.appendChild(el);
+      }
+      // enable buttons
+      copyBtn.disabled = false;
+      playBtn.disabled = true; // because speech will start now
+      stopBtn.disabled = false;
+      // speak
+      speakText(short);
+    });
+
+    playBtn.addEventListener('click', () => {
+      const text = summaryEl.textContent.trim();
+      if (!text) return;
+      playBtn.disabled = true;
+      stopBtn.disabled = false;
+      speakText(text);
+    });
+
+    stopBtn.addEventListener('click', () => {
+      stopSpeech();
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const text = summaryEl.textContent.trim();
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = 'Copied!';
+        setTimeout(()=> copyBtn.textContent = 'Copy Summary', 1400);
+      } catch (e) {
+        alert('Copy failed — please copy manually.');
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      lectureEl.value = '';
+      summaryEl.textContent = 'Your summary will appear here.';
+      flashcardsEl.innerHTML = '';
+      copyBtn.disabled = true;
+      playBtn.disabled = true;
+      stopBtn.disabled = true;
+    });
+
+    // small helper to avoid XSS when inserting HTML
+    function escapeHtml(s){
+      return (s+'')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;')
+        .replace(/\n/g, '<br>');
+    }
+
+    // initialize button states
+    (function init(){
+      copyBtn.disabled = true;
+      playBtn.disabled = true;
+      stopBtn.disabled = true;
+    })();
+  </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dyslexia Helper</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="content">
+        <p>This is an example paragraph. Some <span class="highlight">important</span> words will be highlighted in yellow.</p>
+        <p>Keep in mind that <span class="highlight">certain</span> words are crucial for understanding.</p>
+    </div>
+</body>
+</html>
