@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dyslexia Helper — Image OCR & Summarizer</title>
+
+  <style>
+    :root {
+      --bg:#ffffff;
+      --card:#f7f9fb;
+      --accent:#007acc;
+      --text:#111;
+      --radius:10px;
+    }
+    body {
+      margin:0;
+      font-family: Arial, sans-serif;
+      background:var(--bg);
+      color:var(--text);
+    }
+    .app {
+      max-width:1000px;
+      margin:20px auto;
+      padding:20px;
+      border-radius:var(--radius);
+      background:#fff;
+      box-shadow:0 8px 30px rgba(20,30,50,0.06);
+    }
+    h1 { margin:0 0 10px 0; font-size:22px;}
+    .controls, .actions { display:flex; gap:10px; flex-wrap:wrap; margin:12px 0; }
+    .card {
+      background:var(--card);
+      border-radius:10px;
+      padding:12px;
+      margin-bottom:12px;
+    }
+    textarea {
+      width:100%;
+      min-height:120px;
+      padding:10px;
+      border-radius:8px;
+      border:1px solid #ddd;
+      font-size:15px;
+    }
+    button {
+      background:var(--accent);
+      color:#fff;
+      border:0;
+      padding:8px 12px;
+      border-radius:8px;
+      cursor:pointer;
+      font-weight:600;
+    }
+    button.secondary { background:#666; }
+    .summary {
+      padding:12px;
+      border-radius:8px;
+      background:white;
+      min-height:80px;
+      border:1px dashed #ccc;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Dyslexia Helper — OCR, Summarizer & Audio</h1>
+    <p>Upload notes → Extract text → Summarize → Highlight → Listen.</p>
+
+    <div class="card">
+      <label for="extracted">Input / Extracted text</label>
+      <textarea id="extracted" placeholder="Type or paste text here..."></textarea>
+      <div class="actions">
+        <button id="summarizeBtn">Summarize</button>
+        <button id="clearBtn" class="secondary">Clear</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <label>Summary</label>
+      <div id="summaryArea" class="summary"></div>
+      <div class="actions">
+        <button id="speakBtn">🔊 Speak Text</button>
+        <button id="stopBtn" class="secondary">⏹ Stop</button>
+        <button id="copyBtn" class="secondary">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Summarizer (simple version: takes first few sentences) ---
+    const summarizeBtn = document.getElementById("summarizeBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const extracted = document.getElementById("extracted");
+    const summaryArea = document.getElementById("summaryArea");
+
+    summarizeBtn.addEventListener("click", () => {
+      let text = extracted.value.trim();
+      if (!text) { alert("Please enter some text."); return; }
+      let sentences = text.split(/(?<=[.!?])\s+/);
+      let summary = sentences.slice(0, 3).join(" "); // take first 3 sentences
+      summaryArea.innerText = summary || "Not enough text to summarize.";
+    });
+
+    clearBtn.addEventListener("click", () => {
+      extracted.value = "";
+      summaryArea.innerText = "";
+    });
+
+    // --- Copy button ---
+    document.getElementById("copyBtn").addEventListener("click", () => {
+      navigator.clipboard.writeText(summaryArea.innerText);
+      alert("Summary copied!");
+    });
+
+    // --- Text-to-Speech ---
+    const speakBtn = document.getElementById("speakBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    let utterance;
+
+    speakBtn.addEventListener("click", () => {
+      let text = summaryArea.innerText.trim();
+      if (!text) { alert("No summary available to read."); return; }
+      utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "en-US";
+      utterance.rate = 1; // 1 = normal speed
+      speechSynthesis.speak(utterance);
+    });
+
+    stopBtn.addEventListener("click", () => {
+      if (speechSynthesis.speaking) {
+        speechSynthesis.cancel();
+      }
+    });
+  </script>
+</body>
+</html>
